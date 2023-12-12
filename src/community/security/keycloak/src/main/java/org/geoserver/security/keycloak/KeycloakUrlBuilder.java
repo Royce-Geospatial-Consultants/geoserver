@@ -24,7 +24,7 @@ class KeycloakUrlBuilder {
 
     private void init() {
         StringBuilder sb = new StringBuilder(serverUrl);
-        sb.append("/auth/admin/realms/").append(realm);
+        sb.append("/admin/realms/").append(realm);
         this.sb = sb;
     }
 
@@ -129,7 +129,7 @@ class KeycloakUrlBuilder {
      */
     String buildTokenEndpoint() {
         StringBuilder sb = new StringBuilder(serverUrl);
-        sb.append("/auth/realms/").append(realm);
+        sb.append("/realms/").append(realm);
         String result = sb.append("/protocol/openid-connect/token").toString();
         return result;
     }

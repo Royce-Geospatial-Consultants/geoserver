@@ -5,6 +5,7 @@
 package org.geoserver.security.keycloak;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -33,7 +34,8 @@ import org.geoserver.security.impl.GeoServerRole;
 import org.geoserver.security.impl.GeoServerUser;
 import org.geoserver.security.impl.RoleCalculator;
 import org.geotools.util.logging.Logging;
-import org.keycloak.OAuth2Constants;
+import org.keycloak.KeycloakSecurityContext;
+import org.keycloak.adapters.OidcKeycloakAccount;
 import org.keycloak.adapters.AdapterDeploymentContext;
 import org.keycloak.adapters.AdapterTokenStore;
 import org.keycloak.adapters.KeycloakDeployment;
@@ -64,6 +66,7 @@ public class GeoServerKeycloakFilter extends GeoServerPreAuthenticatedUserNameFi
         implements AuthenticationCachingFilter, GeoServerAuthenticationFilter, LogoutHandler {
 
     private static final String ID_TOKEN_HINT = "id_token_hint";
+    private static final String POST_LOGOUT_REDIRECT_URI = "post_logout_redirect_uri";
 
     private static final Logger LOG = Logging.getLogger(GeoServerKeycloakFilter.class);
 
@@ -100,36 +103,79 @@ public class GeoServerKeycloakFilter extends GeoServerPreAuthenticatedUserNameFi
     }
 
     /** Helper for setting up GeoServer-style logout actions. */
+    //@Override
+    //public void logout(
+    //        HttpServletRequest request,
+    //        HttpServletResponse response,
+    //        Authentication authentication) {
+    //    LOG.log(Level.FINER, "GeoServerKeycloakFilter.logout ENTRY");
+    //    // do some setup and get the deployment
+    //    HttpFacade exchange = new SimpleHttpFacade(request, response);
+    //    KeycloakDeployment deployment = keycloakContext.resolveDeployment(exchange);
+//
+    //    // redirect to referer url stripping all request parameters off
+    //    String referer = request.getHeader(HttpHeaders.REFERER);
+    //    String refererNoParams = referer.split("\\?")[0];
+    //    String clientId = deployment.getResourceName();
+    //    LOG.log(Level.FINER, "GeoServerKeycloakFilter.clientId " + clientId);
+//
+    //    // let geoserver know what to do with this
+    //    request.setAttribute(
+    //            GeoServerLogoutFilter.LOGOUT_REDIRECT_ATTR,
+    //            deployment
+    //                    .getLogoutUrl()
+    //                    .queryParam(POST_LOGOUT_REDIRECT_URI, "clientId")
+    //                    .build()
+    //                    .toString());
+    //}
     @Override
     public void logout(
             HttpServletRequest request,
             HttpServletResponse response,
             Authentication authentication) {
         LOG.log(Level.FINER, "GeoServerKeycloakFilter.logout ENTRY");
-        // do some setup and get the deployment
-        HttpFacade exchange = new SimpleHttpFacade(request, response);
-        KeycloakDeployment deployment = keycloakContext.resolveDeployment(exchange);
-
-        // redirect to referer url stripping all request parameters off
-        String referer = request.getHeader(HttpHeaders.REFERER);
-        String refererNoParams = referer.split("\\?")[0];
-
-        // let geoserver know what to do with this
-        request.setAttribute(
-                GeoServerLogoutFilter.LOGOUT_REDIRECT_ATTR,
-                deployment
-                        .getLogoutUrl()
-                        .queryParam(OAuth2Constants.REDIRECT_URI, refererNoParams)
-                        .queryParam(
-                                ID_TOKEN_HINT,
-                                ((org.keycloak.adapters.OidcKeycloakAccount)
-                                                authentication.getDetails())
-                                        .getKeycloakSecurityContext()
-                                        .getIdTokenString())
-                        .build()
-                        .toString());
+    
+        if (authentication != null) {
+            Object details = authentication.getDetails();
+    
+            if (details != null && details instanceof org.keycloak.adapters.OidcKeycloakAccount) {
+                OidcKeycloakAccount keycloakAccount = (OidcKeycloakAccount) details;
+                KeycloakSecurityContext securityContext = keycloakAccount.getKeycloakSecurityContext();
+    
+                if (securityContext != null) {
+                    String idTokenString = securityContext.getIdTokenString();
+                    LOG.log(Level.FINER, "ID Token String: " + idTokenString);
+    
+                    // do some setup and get the deployment
+                    HttpFacade exchange = new SimpleHttpFacade(request, response);
+                    KeycloakDeployment deployment = keycloakContext.resolveDeployment(exchange);
+    
+                    // redirect to referer URL stripping all request parameters off
+                    String referer = request.getHeader(HttpHeaders.REFERER);
+                    String refererNoParams = Arrays.stream(referer.split("\\?")[0].split(";"))
+                                            .findFirst()
+                                            .orElse(referer);
+                    // let GeoServer know what to do with this
+                    request.setAttribute(
+                            GeoServerLogoutFilter.LOGOUT_REDIRECT_ATTR,
+                            deployment
+                                    .getLogoutUrl()
+                                    .queryParam(POST_LOGOUT_REDIRECT_URI, refererNoParams)
+                                    .queryParam(ID_TOKEN_HINT, idTokenString)
+                                    .build()
+                                    .toString());
+    
+                } else {
+                    LOG.log(Level.WARNING, "KeycloakSecurityContext is null");
+                }
+            } else {
+                LOG.log(Level.WARNING, "Authentication details are null or not an instance of OidcKeycloakAccount");
+            }
+        } else {
+            LOG.log(Level.WARNING, "Authentication is null");
+        }
     }
-
+    
     /** Cache based on the "Authorization" HTTP header. */
     @Override
     public String getCacheKey(HttpServletRequest request) {
